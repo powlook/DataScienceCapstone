@@ -1,0 +1,206 @@
+---
+title: "Data Science Capstone - Exploratory Analysis of Yelp Dataset"
+author: "PLYap"
+date: "22nd November 2015"
+output: word_document
+---
+## Introduction 
+This project looks into the review dataset provided by Yelp. In particular, I will be exploring the review of top reviewers (called Influencers) on whether it will have an impact on the businesses it reviewed, ie to see if it results in businesses getting better reviews (star ratings) subsequently.  
+
+## Method
+For this analysis, we will be using the review, business and users dataset. 
+
+From the users, we will identify the top reviewers using predictive analysis. We will run a random tree prediction of all the variables in the users dataset to find out what are the key variables that will determine whether the user is 'popular'. From the top 2-3 variables we will use it to rank to get the top reviewers, which we will identify as 'influencers"
+
+From the influencers, we will identify what are the businesses they have reviewed through. We will take the business which is given the lowest score ("stars") by the influencer and plot all their reviews, to see if there is an improvements in the reviews subsequently.
+
+## Data Cleansing and Exploration
+After downloading the yelp dataset from their website,we will read the dataset into R. As some of the dataset like reviews which will explode to more than 1.5GB when expanded, the method will be to read in the data once (which may take a few hours) and then saved it back as an object file (.RDS). This is so that in subsequeny reads, it will take a much short time to read in the data. There all data read into the project will be in .RDS format
+
+```{r Setup, echo=FALSE}
+suppressMessages(library(jsonlite))
+suppressMessages(library(dplyr))
+suppressMessages(library(ggplot2))
+suppressMessages(library(lubridate))
+suppressMessages(library(e1071))
+suppressMessages(library(caret))
+suppressMessages(library(randomForest))
+suppressMessages(library(knitr))
+setwd("E:/Coursera/10. Data Science Capstone/Assignments")
+```
+
+### Explore and Clean User Dataset
+The users dataset is read and the following operations conducted :  
+- Convert all the NAs to 0  
+- Flatten the file and remove the lists  
+- Add all the votes to give a new variable, 'votes.total'  
+- Add all the compliments to give a new variable, 'compliments.total'  
+- Convert the 'elite' variable to a new 'popular' variable on logical factor  
+- Remove all the non-relevant columns and save to a new file, users.reduced  
+```{r User, echo=FALSE, cache=TRUE}
+  users <- readRDS('yelp_dataset/users.rds')
+  users$compliments[is.na(users$compliments)] = 0      ## Convert all NAs to 0
+  users.reduced = flatten(users[c(2,3,4,5,7,8,10)])    ## Flatten and Remove unwanted variables
+  users.reduced$votes.total = rowSums(users$votes)
+  users.reduced$compliments.total = rowSums(users$compliments)
+  users.reduced$friends = sapply(users$friends, length)
+  users.reduced$popular = factor(sapply(users$elite, length) > 0)
+  
+  save(users.reduced, file = 'yelp_dataset/users_reduced.rds')  ## Save reduced dataset to be used later
+
+```
+
+### Explore and Clean Business Dataset
+Read the business dataset into R and perform the following operations :
+- Flatten the dataset   
+- Convert the categories variables from a list to a string  
+```{r Business, echo=FALSE,cache=TRUE}
+business <- readRDS("yelp_dataset/business.rds")
+business <- flatten(business)  ## Flatten and unlist the business file
+business$categories <- sapply(business$categories, toString)  ## Unlist the categories
+```
+
+### Explore and Clean Review Dataset
+Read the review dataset into R and perform the following operations :  
+- Convert the 'date' variable to Date format and create a 'year' variable from there  
+- Join the dataset with the business categories variable from business dataset  
+```{r Review, echo=FALSE, cache=TRUE}
+review      <- readRDS("yelp_dataset/review.rds") 
+review$date <- as.Date(review$date)
+review$year <- year(review$date)
+day(review$date) <- 1
+## Create Review Subset with Categories from Business
+review_category <- left_join(review[c(-1,-3,-6,-7)],business[c(1,4)],by="business_id")  ## Join with categories from business
+saveRDS(review_category,"yelp_dataset/review_category.rds")
+```
+
+## Predictive Analysis of Influencers
+We will read the user-reduced dataset that was saved earlier. We will perform the following steps
+1. Partition the dataset into training(60%) and test(40%) set.  
+2. Run a randomforest classification using the "popular" variable as the objective variable against all the other variables.  
+3. Identify the top 2-3 variables that selects the "popular" reviewers.  
+4. Determine the number of trees required and also the number of mtrys to give the best prediction  
+5. Conduct the prediction and perform a Confusion Matrix on the results    
+
+```{r Prediction, echo=FALSE}
+    set.seed(1960)
+    trainIndex <- createDataPartition(users.reduced$popular, p = 0.60,list=FALSE)
+    trainUser <-  users.reduced[trainIndex,]
+    testUser  <-  users.reduced[-trainIndex,]   
+```
+
+### Run Random Forest Analysis and Plot Error Rate Curve
+```{r Random Forest,cache=TRUE, echo=FALSE, fig.height= 5}
+ # run once with 300 trees to see learning curve
+    RF = randomForest(popular ~ ., trainUser[c(-2,-3)],ntree = 300)
+
+    plot(RF$err.rate[, 'OOB']) # learning curve
+```
+Note : Random Forest shows that 200 trees is sufficient enought to achieve the lowest error rate.  
+
+### Run Random Forest to validate the optimun mtry level
+```{r Plot Validation Curve, cache=TRUE, echo=FALSE}
+    n = 200 # error levels off after 200 trees
+
+    train = function (x)
+    {
+        randomForest(popular ~ ., trainUser[c(-2,-3)], mtry = x, ntree = n)$err.rate[n, 'OOB']
+    }
+    param = seq(2, 20, 2) # values of mtry to validate
+    plot(param, sapply(param, train)) # validation curve for mtry parameter
+```
+Note : The analysis show that mtry of 10 gives the lowest error rate.
+
+### Run Predictive Analysis and Plot Variable Importance Plot
+Train a random forest using the best parameter from validation curve
+```{r Plot Varible Importance Plot, fig.height=5, cache=TRUE, echo=FALSE}
+    best = 10 # mtry with min validation error
+    n = 200
+    RF = randomForest(popular ~ ., trainUser[c(-2,-3)], mtry = best, ntree = n)
+
+    varImpPlot(RF) # variable importance
+
+    # prediction on test set
+    y = as.logical(testUser$popular)      # actual values
+    p = as.logical(predict(RF, testUser)) # predictions
+
+    # Confusion Matrix
+    confusionMatrix(p,testUser$popular)$table
+    confusionMatrix(p,testUser$popular)$overall[1]
+    confusionMatrix(p,testUser$popular)$byClass[1:2]                                
+```
+### Rank the top influencers by "Compliments.total" & "Votes.Cool"
+Use the top 2 variables found above to rank the reviewers, which we will call the influencers.  
+```{r Rank Influencers, cache=TRUE, echo=FALSE}
+   users.popular <- subset(users.reduced,popular=="TRUE")
+   users.rank <- arrange(users.popular,desc(compliments.total,votes.cool))
+   top.influencers <- head(users.rank[c(1,2,3,4,5,20,21,22)],10)
+```
+### Gather all the reviews of Top 4 Influencers with reviews in 2009  
+Only 4 of the top influencers have reviews in 2009 that is substantial for statistical analysis  
+```{r Reviews of Top 4 Influencers, cache = TRUE, echo=FALSE}
+t10 <- lapply(1:10,function(x) {top1.reviews <- subset(review_category, review_category$user_id == top.influencers$user_id[x] & review_category$year == 2009)})
+top5.influencers <- list(t10[[1]],t10[[2]],t10[5],t10[7])   
+saveRDS(top5.influencers, file = 'yelp_dataset/top5_influencers.rds')
+```
+### Extract and Plot Reviews  
+Extract all the reviews of one business that was given the lowest score by the each of the top 4 influencers.  
+Plot the reviews across the years and see if there is an upward trend in the number of stars given to the business  
+Conduct statistical t-test on the star ratings before and after the review  
+```{r Plot Reviews, echo=FALSE, fig.height=4, fig.width=7}
+lowest.business_id = function (x)
+{
+  lowest <- arrange(data.frame(top5.influencers[x]),stars)[1,4]
+  lowest.reviews <- subset(review_category, review_category$business_id == lowest)
+  lowest.summary <- summarise(group_by(lowest.reviews,date),stars = mean(stars))
+  lowest.date    <- arrange(data.frame(top5.influencers[x]),stars)[1,3]
+  lowest.star    <- arrange(data.frame(top5.influencers[x]),stars)[1,2]  
+  before.review  <- subset(lowest.summary, date < lowest.date)
+  after.review   <- subset(lowest.summary, date >= lowest.date)
+  with(lowest.summary, plot(date, stars, ylim=c(0,5), main=paste("Reviews of Business ",x),type="n"))
+  with(lowest.summary, points(date, stars)) 
+  with(lowest.summary, points(lowest.date, lowest.star, col = "red", pch = 19))  
+  abline(lm(stars~date,lowest.summary), col="blue")
+}
+   par(mfrow=c(1,2))
+   lowest.review.plot <- lapply(1:4,lowest.business_id)
+```
+
+### Conduct Statistical t-test
+Extract all the reviews of one business that was given the lowest score by the each of the top 4 influencers.
+Conduct statistical t-test on the star ratings before and after the review
+```{r Statistical Tests, echo = FALSE}
+test.results = function (x)
+{
+  lowest <- arrange(data.frame(top5.influencers[x]),stars)[1,4]
+  lowest.reviews <- subset(review_category, review_category$business_id == lowest)
+  lowest.summary <- summarise(group_by(lowest.reviews,date),stars = mean(stars))
+  lowest.date    <- arrange(data.frame(top5.influencers[x]),stars)[1,3]
+  before.review  <- subset(lowest.summary, date < lowest.date)
+  after.review   <- subset(lowest.summary, date >= lowest.date)
+  t.test(before.review$stars,after.review$stars,alternative = "less")
+}
+   results <- lapply(1:4,test.results)
+```
+## Results  
+Hypothesis Tests :  
+Null Hypothesis      : Mean Before Review = Mean After Review  
+Alternate Hypothesis : Mean Before Review <> Mean After Review  
+Results :    
+Test 1 - Before Review (Mean stars) `r format(round(results[[c(1,5)]][1],2))` After Review (Mean stars) `r format(round(results[[c(1,5)]][2],2))` P-value `r format(round(results[[c(1,3)]],4))`    
+Test 2 - Before Review (Mean stars) `r format(round(results[[c(2,5)]][1],2))` After Review (Mean stars) `r format(round(results[[c(2,5)]][2],2))` P-value `r format(round(results[[c(2,3)]],4))`     
+Test 3 - Before Review (Mean stars) `r format(round(results[[c(3,5)]][1],2))` After Review (Mean stars) `r format(round(results[[c(3,5)]][2],2))` P-value `r format(round(results[[c(3,3)]],4))`      
+Test 4 - Before Review (Mean stars) `r format(round(results[[c(4,5)]][1],2))` After Review (Mean stars) `r format(round(results[[c(4,5)]][2],2))` P-value `r format(round(results[[c(4,3)]],4))`      
+
+## Discussions
+The results of the t-tests of the star ratings before the review and after the review show
+inconsistent results :  
+Test 1 - As the p-value (@.1920) is greater than 5%, we cannot reject the Null Hypothesis.   
+Test 2 - As the p-value (@.2533) is greater than 5%, we cannot reject the Null Hypothesis.  
+Test 3 - As the p-value (@.6914) is greater than 5%, we cannot reject the Null Hypothesis. In fact, the mean before the influencer's review is greater than after the review.   
+Test 4 - As the p-value (@.9882) is greater than 5%, we cannot reject the Null Hypothesis.  In fact, the mean before the influencer's review is greater than after the review.   
+
+## Conclusion
+From the results of the statistical tests, we can conclude that the reviews given by top reviewers (influencers) do not have a significant impact on the subsequent reviews of the business. In 2 of the cases, the review ratings after that is even lower than before.  
+
+

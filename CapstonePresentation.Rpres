@@ -1,0 +1,86 @@
+Exploratory Analysis of Yelp Dataset - The impact of top reviewers on the businesses it reviewed  
+========================================================
+author: Yap Pow Look
+date  : 22nd Nov 2015
+font-family: 'Lato'
+width: 1280
+height: 800
+
+Introduction
+========================================================
+
+This project looks into the review dataset provided by Yelp. Essentially the question is : Whether the reviews of top reviewers (called Influencers) will have an impact on the businesses it reviewed, ie to see if it resulted in businesses getting better reviews (star ratings) subsequently.  
+
+## Data
+
+The following datasets are used : Businesses, Reviews & Users
+
+## Methods
+
+We extract the top 4 reviewers (based on 2 top variables selected through RandomForest) and look at one of their poorest reviews of a business. We then do a comparison of all the reviews gardnered by that business before and after the top reviewer's grade and determine if there is a positive change, using statistical inferences
+
+Plots of Reviews  
+========================================================
+These plots show the reviews of 4 businesses over the years.
+```{r, Plot Reviews, echo=FALSE, cache = TRUE, fig.width=8.5}
+suppressMessages(library(dplyr))
+top5.influencers <- readRDS("yelp_dataset/top5_influencers.rds")
+review_category  <- readRDS("yelp_dataset/review_category.rds")
+lowest.business_id = function (x)
+{
+  lowest <- arrange(data.frame(top5.influencers[x]),stars)[1,4]
+  lowest.reviews <- subset(review_category, review_category$business_id == lowest)
+  lowest.summary <- summarise(group_by(lowest.reviews,date),stars = mean(stars))
+  lowest.date    <- arrange(data.frame(top5.influencers[x]),stars)[1,3]
+  lowest.star    <- arrange(data.frame(top5.influencers[x]),stars)[1,2]  
+  before.review  <- subset(lowest.summary, date < lowest.date)
+  after.review   <- subset(lowest.summary, date >= lowest.date)
+  with(lowest.summary, plot(date, stars, ylim=c(0,5), main=paste("Reviews of Business ",x),type="n"))
+  with(lowest.summary, points(date, stars)) 
+  with(lowest.summary, points(lowest.date, lowest.star, col = "red", pch = 19))    
+  abline(lm(stars~date,lowest.summary),col = "blue")  
+}
+ par(mfrow=c(1,2))  
+lowest.review.plot <- lapply(1:4,lowest.business_id)  
+```
+The red dot shows the star rating given by the influencer on the business.  
+
+Statistical Tests
+========================================================
+```{r Statistical Test, echo=FALSE}
+suppressMessages(library(dplyr))
+test.results = function (x)
+{
+  lowest <- arrange(data.frame(top5.influencers[x]),stars)[1,4]
+  lowest.reviews <- subset(review_category, review_category$business_id == lowest)
+  lowest.summary <- summarise(group_by(lowest.reviews,date),stars = mean(stars))
+  lowest.date    <- arrange(data.frame(top5.influencers[x]),stars)[1,3]
+  before.review  <- subset(lowest.summary, date < lowest.date)
+  after.review   <- subset(lowest.summary, date >= lowest.date)
+  t.test(before.review$stars,after.review$stars, alternative = "less")
+}
+   results <- lapply(1:4,test.results)
+```
+## Results  
+Hypothesis Tests :  
+Null Hypothesis      : Mean Before Review = Mean After Review  
+Alternate Hypothesis : Mean Before Review <> Mean After Review  
+Results :    
+Test 1 - Before Review (Mean stars) `r format(round(results[[c(1,5)]][1],2))` After Review (Mean stars) `r format(round(results[[c(1,5)]][2],2))` P-value `r format(round(results[[c(1,3)]],4))`    
+Test 2 - Before Review (Mean stars) `r format(round(results[[c(2,5)]][1],2))` After Review (Mean stars) `r format(round(results[[c(2,5)]][2],2))` P-value `r format(round(results[[c(2,3)]],4))`     
+Test 3 - Before Review (Mean stars) `r format(round(results[[c(3,5)]][1],2))` After Review (Mean stars) `r format(round(results[[c(3,5)]][2],2))` P-value `r format(round(results[[c(3,3)]],4))`      
+Test 4 - Before Review (Mean stars) `r format(round(results[[c(4,5)]][1],2))` After Review (Mean stars) `r format(round(results[[c(4,5)]][2],2))` P-value `r format(round(results[[c(4,3)]],4))`  
+
+Discussions  
+============
+The results of the t-tests of the star ratings before the review and after the review show
+inconsistent results :  
+Test 1 - As the p-value (@.1920) is greater than 5%, we cannot reject the Null Hypothesis.   
+Test 2 - As the p-value (@.2533) is greater than 5%, we cannot reject the Null Hypothesis.  
+Test 3 - As the p-value (@.6914) is greater than 5%, we cannot reject the Null Hypothesis. In fact, the mean before the influencer's review is greater than after the review.   
+Test 4 - As the p-value (@.9882) is greater than 5%, we cannot reject the Null Hypothesis.  In fact, the mean before the influencer's review is greater than after the review.  
+
+## Conclusion  
+   
+From the results of the statistical tests, we can conclude that the review given by top reviewers (influencers) to a business do not have a significant impact on the subsequent reviews (star ratings) of that business.  
+
